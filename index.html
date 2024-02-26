@@ -5,13 +5,9 @@
     <script src="https://cdn.jsdelivr.net/npm/papaya-viewer@latest/release/current/standard/papaya.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.5.2"></script>
 
-    <script type="text/javascript" src="libs/nifti-reader.js"></script>
-    <script type="text/javascript" src="libs/nifti-reader-min.js"></script>
-
-
     <script type="text/javascript">
       var params = [];
-      params["images"] = ["https://gaiborjosue.github.io/researchexperiment/avf.nii.gz"];
+      params["images"] = ["https://gaiborjosue.github.io/brainchop/experimental_mode/CanvasVersion/MRI Sample/t1_c.nii.gz"];
       params["fullScreen"] = true;
     </script>
   </head>
@@ -22,9 +18,9 @@
 
         binarizeVolumeDataTensor = (volumeDataTensor) => {
 
-        let alpha = 0;
-        // element-wise: (x > 0 ? 1 : alpha * x );  e.g. Tenosr [0, 0.9, 0.8, -3] => Tensor [0, 1, 1, 0]   
-        return   volumeDataTensor.step(alpha); 
+            let alpha = 0;
+            // element-wise: (x > 0 ? 1 : alpha * x );  e.g. Tenosr [0, 0.9, 0.8, -3] => Tensor [0, 1, 1, 0]   
+            return   volumeDataTensor.step(alpha); 
 
         }
 
@@ -198,6 +194,8 @@
           return    array2ArrayBuffer(outImageArray, header.datatypeCode); 
         };
 
+
+
         async function loadModel() {
 
             let arrayBuffer = papayaContainers[0].viewer.screenVolumes[0].volume.imageData.data;
@@ -206,34 +204,31 @@
 
             let dimensions = [papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.xDim, papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.yDim, papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.zDim];
 
-            // let tensor = tf.tensor(arrayBuffer, dimensions);
+            let tensor = tf.tensor(arrayBuffer, dimensions);
 
-            // tensor = tensor.reshape([-1, dimensions[2], dimensions[1], dimensions[0], 1]);
+            tensor = tensor.reshape([-1, dimensions[2], dimensions[1], dimensions[0], 1]);
 
-            // const model = await tf.loadLayersModel("https://raw.githubusercontent.com/gaiborjosue/brainchop/master/models/model11_gw_ae/model.json");
+            const model = await tf.loadLayersModel("https://raw.githubusercontent.com/gaiborjosue/brainchop/master/models/model11_gw_ae/model.json");
 
-            // const prediction = model.predict(tensor);
+            const prediction = model.predict(tensor);
 
             //*************************************************************//
-            /* let predictionArray = prediction.dataSync();
+            let predictionArray = prediction.dataSync();
 
-            let prediction_argmax = tf.argMax(prediction, -1);
-
-            let labelArrayBuffer;
-
-            let brainMask = Array.from(prediction_argmax.dataSync());
-
-            labelArrayBuffer = createNiftiOutArrayBuffer(arrayBuffer, brainMask);
-
-            // prediction_argmax = prediction_argmax.reshape([dimensions[2], dimensions[1], dimensions[0]]);
-            console.log(labelArrayBuffer); */
 
             let nparams = [];
 
-            nparams["binaryImages"] = {"lut": "Spectrum"};
+            console.log(tensor1.shape);
 
-            // papaya.Container.addImage(0, [labelArrayBuffer], nparams);
+            nparams["t1_c.nii.gz"] =  {"lut": "Red Overlay"};
 
+            papaya.Container.addImage(0, ["https://gaiborjosue.github.io/brainchop/experimental_mode/CanvasVersion/MRI Sample/t1_c.nii.gz"],nparams);
+
+
+            // updateSegmentation(predictionArray);
+
+            window.labelArrayBuffer = predictionArray;
+        
             };
         
 
@@ -241,6 +236,20 @@
             papaya.Container.startPapaya();
             loadModel();
         }, 2000);
+
+        function updateSegmentation() {
+
+            old = papayaContainers[0].viewer.screenVolumes[1].volume.imageData.data;
+
+            nnew = labelArrayBuffer
+
+            papayaContainers[0].viewer.screenVolumes[1].volume.imageData.data = nnew;
+
+            // force redraw
+            papayaContainers[0].resizeViewerComponents([500,500])
+
+
+        }
 
     
     </script>
