@@ -204,21 +204,40 @@
 
             let dimensions = [papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.xDim, papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.yDim, papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.zDim];
 
+
             let tensor = tf.tensor(arrayBuffer, dimensions);
 
-            tensor = tensor.reshape([-1, dimensions[2], dimensions[1], dimensions[0], 1]);
+            tensor = tensor.reshape([-1, dimensions[0], dimensions[1], dimensions[2], 1]);
 
             const model = await tf.loadLayersModel("https://raw.githubusercontent.com/gaiborjosue/brainchop/master/models/model11_gw_ae/model.json");
 
-            const prediction = model.predict(tensor);
+            let prediction = model.predict(tensor);
 
-            //*************************************************************//
             let predictionArray = prediction.dataSync();
 
+            //*************************************************************//
 
+            let grayscale = new Float32Array(predictionArray.length / 4);
+
+            for (let i = 0; i < predictionArray.length; i += 4) {
+                grayscale[i / 4] = predictionArray[i];
+            }
+
+
+            // let binaryPrediction = binarizeVolumeDataTensor(prediction).dataSync();
+
+            let maskBinaryData1D = [];
+            for (let idx = 0; idx < grayscale.length; idx++) {
+
+                if(grayscale[idx] > 0) {
+                    maskBinaryData1D[idx] = 1;                   
+                } else {
+                    maskBinaryData1D[idx] = 0;                   
+                }
+            }
+
+            
             let nparams = [];
-
-            console.log(tensor1.shape);
 
             nparams["t1_c.nii.gz"] =  {"lut": "Red Overlay"};
 
@@ -227,7 +246,7 @@
 
             // updateSegmentation(predictionArray);
 
-            window.labelArrayBuffer = predictionArray;
+            window.labelArrayBuffer = grayscale;
         
             };
         
