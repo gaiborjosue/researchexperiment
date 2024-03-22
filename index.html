@@ -3,11 +3,13 @@
   <head>
     <title>Papaya Viewer</title>
     <script src="https://cdn.jsdelivr.net/npm/papaya-viewer@latest/release/current/standard/papaya.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.5.2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
 
     <script type="text/javascript">
       var params = [];
-      params["images"] = ["https://gaiborjosue.github.io/brainchop/experimental_mode/CanvasVersion/MRI Sample/t1_c.nii.gz"];
+      params["images"] = [
+        "https://gaiborjosue.github.io/brainchop/experimental_mode/CanvasVersion/MRI Sample/t1_c.nii.gz",
+      ];
       params["fullScreen"] = true;
     </script>
   </head>
@@ -16,263 +18,85 @@
 
     <script type="text/javascript">
 
-        binarizeVolumeDataTensor = (volumeDataTensor) => {
+      async function loadModel() {
+        let arrayBuffer =
+          papayaContainers[0].viewer.screenVolumes[0].volume.imageData.data;
 
-            let alpha = 0;
-            // element-wise: (x > 0 ? 1 : alpha * x );  e.g. Tenosr [0, 0.9, 0.8, -3] => Tensor [0, 1, 1, 0]   
-            return   volumeDataTensor.step(alpha); 
+        let niftiHeader =
+          papayaContainers[0].viewer.screenVolumes[0].volume.header.fileFormat
+            .nifti;
 
-        }
+        let dimensions = [
+          papayaContainers[0].viewer.screenVolumes[0].volume.header
+            .imageDimensions.xDim,
+          papayaContainers[0].viewer.screenVolumes[0].volume.header
+            .imageDimensions.yDim,
+          papayaContainers[0].viewer.screenVolumes[0].volume.header
+            .imageDimensions.zDim,
+        ];
 
-        getAllSlices2D = (allSlices, slice_height, slice_width) => {
-            let allSlices_2D = [];
-            for(let sliceIdx = 0; sliceIdx < allSlices.length; sliceIdx ++){
-                allSlices_2D.push(tf.tensor(allSlices[sliceIdx], [slice_height, slice_width]));
-            }   
+        console.log(dimensions);
 
-            return   allSlices_2D;   
-        }
+        let tensor = tf.tensor(arrayBuffer, dimensions);
 
-        getSlices3D = (allSlices_2D) => {
-            return tf.stack(allSlices_2D);  
-        }
+        tensor = tensor.reshape([
+          -1,
+          dimensions[0],
+          dimensions[1],
+          dimensions[2],
+          1,
+        ]);
 
-        getAllSlicesData1D = (num_of_slices, niftiHeader, niftiImage) => {
-            let allSlices = [];
-            for(let sliceIdx = 0; sliceIdx < num_of_slices; sliceIdx++) {
-                let slice = getSliceData1D(sliceIdx, niftiHeader, niftiImage);
-                allSlices.push(slice);
-            }        
+        const model = await tf.loadLayersModel(
+          "https://brainchop.org/models/model5_gw_ae/model.json"
+        );
 
-            return   allSlices; 
-        }
+        let prediction = model.predict(tensor);
 
-        getSliceData1D = (sliceIdx, niftiHeader, niftiImage) => {
-            // Get nifti dimensions
-            let cols = niftiHeader.dims[1]; // Slice width
-            let rows = niftiHeader.dims[2]; // Slice height
+        let predictionArray = prediction.dataSync();
 
-            let typedData;
+        //*************************************************************//
 
-            if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_UINT8) {
-                typedData = new Uint8Array(niftiImage);
-            } else if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_INT16) {
-                typedData = new Int16Array(niftiImage);
-            } else if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_INT32) {
-                typedData = new Int32Array(niftiImage);
-            } else if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_FLOAT32) {
-                typedData = new Float32Array(niftiImage);
-            } else if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_FLOAT64) {
-                typedData = new Float64Array(niftiImage);
-            } else if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_INT8) {
-                typedData = new Int8Array(niftiImage);
-            } else if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_UINT16) {
-                typedData = new Uint16Array(niftiImage);
-            } else if (niftiHeader.datatypeCode === nifti.NIFTI1.TYPE_UINT32) {
-                typedData = new Uint32Array(niftiImage);
-            } else {
-                return;
-            }
+        let predictionReshaped = prediction.reshape([256, 256, 256, 3]);
 
-            // offset to specified slice
-            let sliceSize = cols * rows;
+        let predictionArgmax = tf.argMax(predictionReshaped, -1);
+        
 
-            let sliceOffset = sliceSize * sliceIdx;
+        let nparams = [];
 
-            let data1DimArr = [];
-
-            // Draw pixels
-            for (let row = 0; row < rows; row++) {
-                let rowOffset = row * cols;
-
-                for (let col = 0; col < cols; col++) {
-                    let offset = sliceOffset + rowOffset + col;
-                    let value = typedData[offset];
-                    // Create 1Dim Array of pixel value, this 1 dim represents one channel 
-                    data1DimArr[(rowOffset + col)] = value & 0xFF;
-
-                }
-            }            
-
-            return data1DimArr;    
-        }
-
-        normalizeVolumeData = (volumeData) => {
-            //Normalize the data to the range 0 - 1 using min-max scaling
-            const volumeData_Max = volumeData.max();
-            const volumeData_Min = volumeData.min();
-            const normalizedSlices_3d = volumeData.sub(volumeData_Min).div(volumeData_Max.sub(volumeData_Min));
-            return  normalizedSlices_3d;      
-	    }
-
-        array2ArrayBuffer = (array, datatypeCode) => {
-          let typedArray;
-
-          if (datatypeCode === nifti.NIFTI1.TYPE_UINT8) {
-              typedArray =  Uint8Array.from(array);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_INT16) {
-              typedArray =  Int16Array.from(array);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_INT32) {
-              typedArray =  Int32Array.from(array);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_FLOAT32) {
-              typedArray =  Float32Array.from(array);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_FLOAT64) {
-              typedArray =  Float64Array.from(array);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_INT8) {
-              typedArray =  Int8Array.from(array);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_UINT16) {
-              typedArray =  Uint16Array.from(array);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_UINT32) {
-              typedArray =  Uint32Array.from(array);
-          } else {
-              return;
-          }  
-
-
-          // Convert typedArray to ArrayBuffer and return ArrayBuffer
-          return typedArray.buffer.slice(typedArray.byteOffset, typedArray.byteLength + typedArray.byteOffset)
-        }
-
-        arrayBuffer2Array = (arrayBuffer, datatypeCode) => {
-          let typedArrData;
-
-          if (datatypeCode === nifti.NIFTI1.TYPE_UINT8) {
-              typedArrData = new Uint8Array(arrayBuffer);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_INT16) {
-              typedArrData = new Int16Array(arrayBuffer);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_INT32) {
-              typedArrData = new Int32Array(arrayBuffer);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_FLOAT32) {
-              typedArrData = new Float32Array(arrayBuffer);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_FLOAT64) {
-              typedArrData = new Float64Array(arrayBuffer);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_INT8) {
-              typedArrData = new Int8Array(arrayBuffer);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_UINT16) {
-              typedArrData = new Uint16Array(arrayBuffer);
-          } else if (datatypeCode === nifti.NIFTI1.TYPE_UINT32) {
-              typedArrData = new Uint32Array(arrayBuffer);
-          } else {
-              return;
-          }  
-
-
-          // Convert typedArray to array using Spread syntax[...]
-          let arr = [...typedArrData];
-          return arr;
-        }
-
-        createNiftiOutArrayBuffer = (rawData, data) => {
-          // read rawNiftiData header
-          let header = papayaContainers[0].viewer.screenVolumes[0].volume.header.fileFormat.nifti;
-          let imageData = [];
-          let outNifti = []
-          let headerArrBuf = [];
-          let outImageArray = [];
-
-          let imageOffset = header.vox_offset,
-              timeDim = 1,
-              statDim = 1;
-
-          if (header.dims[4]) {
-              timeDim = header.dims[4];
-          }
-
-          if (header.dims[5]) {
-              statDim = header.dims[5];
-          }
-
-          let imageSize = header.dims[1] * header.dims[2] * header.dims[3] * timeDim * statDim * (header.numBitsPerVoxel / 8);
-
-          headerArrBuf = rawData.slice(0, imageOffset);
-
-          // Convert to normal array
-          let headerArray = arrayBuffer2Array(headerArrBuf, header.datatypeCode);
-
-          outImageArray = headerArray.concat(data)
-
-          return    array2ArrayBuffer(outImageArray, header.datatypeCode); 
+        nparams["t1_c.nii.gz"] = {
+          min: 1,
+          max: 3,
+          lut: "Red Overlay",
         };
 
+        papaya.Container.addImage(
+          0,
+          [
+            "https://gaiborjosue.github.io/brainchop/experimental_mode/CanvasVersion/MRI Sample/t1_c.nii.gz",
+          ],
+          nparams
+        );
 
+        window.labelArrayBuffer = predictionArgmax.dataSync();
+      }
 
-        async function loadModel() {
+      setTimeout(() => {
+        papaya.Container.startPapaya();
+        loadModel();
+      }, 2000);
 
-            let arrayBuffer = papayaContainers[0].viewer.screenVolumes[0].volume.imageData.data;
+      function updateSegmentation() {
+        old = papayaContainers[0].viewer.screenVolumes[1].volume.imageData.data;
 
-            let niftiHeader = papayaContainers[0].viewer.screenVolumes[0].volume.header.fileFormat.nifti;
+        nnew = labelArrayBuffer;
 
-            let dimensions = [papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.xDim, papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.yDim, papayaContainers[0].viewer.screenVolumes[0].volume.header.imageDimensions.zDim];
+        papayaContainers[0].viewer.screenVolumes[1].volume.imageData.data =
+          nnew;
 
-
-            let tensor = tf.tensor(arrayBuffer, dimensions);
-
-            tensor = tensor.reshape([-1, dimensions[0], dimensions[1], dimensions[2], 1]);
-
-            const model = await tf.loadLayersModel("https://raw.githubusercontent.com/gaiborjosue/brainchop/master/models/model11_gw_ae/model.json");
-
-            let prediction = model.predict(tensor);
-
-            let predictionArray = prediction.dataSync();
-
-            //*************************************************************//
-
-            let grayscale = new Float32Array(predictionArray.length / 4);
-
-            for (let i = 0; i < predictionArray.length; i += 4) {
-                grayscale[i / 4] = predictionArray[i];
-            }
-
-
-            // let binaryPrediction = binarizeVolumeDataTensor(prediction).dataSync();
-
-            let maskBinaryData1D = [];
-            for (let idx = 0; idx < grayscale.length; idx++) {
-
-                if(grayscale[idx] > 0) {
-                    maskBinaryData1D[idx] = 1;                   
-                } else {
-                    maskBinaryData1D[idx] = 0;                   
-                }
-            }
-
-            
-            let nparams = [];
-
-            nparams["t1_c.nii.gz"] =  {"lut": "Red Overlay"};
-
-            papaya.Container.addImage(0, ["https://gaiborjosue.github.io/brainchop/experimental_mode/CanvasVersion/MRI Sample/t1_c.nii.gz"],nparams);
-
-
-            // updateSegmentation(predictionArray);
-
-            window.labelArrayBuffer = grayscale;
-        
-            };
-        
-
-        setTimeout(() => {
-            papaya.Container.startPapaya();
-            loadModel();
-        }, 2000);
-
-        function updateSegmentation() {
-
-            old = papayaContainers[0].viewer.screenVolumes[1].volume.imageData.data;
-
-            nnew = labelArrayBuffer
-
-            papayaContainers[0].viewer.screenVolumes[1].volume.imageData.data = nnew;
-
-            // force redraw
-            papayaContainers[0].resizeViewerComponents([500,500])
-
-
-        }
-
-    
+        // force redraw
+        papayaContainers[0].resizeViewerComponents([500, 500]);
+      }
     </script>
-
-    
   </body>
 </html>
